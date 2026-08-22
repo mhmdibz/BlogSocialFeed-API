@@ -1,155 +1,278 @@
-# Blog Social Feed API
+# 📝 Blog Social Feed System
 
-A production-ready RESTful API for a blogging platform built with **ASP.NET Core 9**, following **Clean Architecture** and **Domain-Driven Design (DDD)** principles.
-
-![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?style=flat&logo=dotnet)
-![ASP.NET Core](https://img.shields.io/badge/ASP.NET_Core-Web_API-512BD4?style=flat&logo=dotnet)
-![EF Core](https://img.shields.io/badge/EF_Core-9.0-512BD4?style=flat&logo=dotnet)
-![SQL Server](https://img.shields.io/badge/SQL_Server-CC2927?style=flat&logo=microsoftsqlserver&logoColor=white)
-![Swagger](https://img.shields.io/badge/Swagger-UI-85EA2D?style=flat&logo=swagger&logoColor=black)
+A RESTful API for a social blogging platform built with **ASP.NET Core 9**, following **Clean Architecture** and **Domain-Driven Design**. Supports users, posts, comments, and reactions with rich domain models, optimistic concurrency, and soft delete.
 
 ---
 
-## 📌 Overview
+## 📋 Table of Contents
 
-Blog Social Feed API allows users to create posts, comment, react with emotions (Like, Love, Clap, Smile), and follow each other — all exposed through a clean, well-structured REST API with Swagger documentation.
+- [Features](#features)
+- [Technical Highlights](#technical-highlights)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Design Patterns](#design-patterns)
+- [Getting Started](#getting-started)
+- [API Endpoints](#api-endpoints)
+- [Future Improvements](#future-improvements)
+- [Learning Goals](#learning-goals)
+- [Author](#author)
 
 ---
 
-## 🏗️ Architecture
+## Features
+
+- ✅ User management with paginated listing and search
+- ✅ Post management with pagination and per-user filtering
+- ✅ Comments on posts
+- ✅ Reactions (Like / Love / Clap / Smile) on posts and comments, with one reaction per user enforced
+- ✅ Soft delete across entities instead of permanent deletion
+- ✅ Optimistic concurrency control on Users, Posts, and Comments
+- ✅ Global exception-handling middleware
+- ✅ Automatic database migration and seeding on startup
+- ✅ Swagger / OpenAPI documentation
+
+---
+
+## Technical Highlights
+
+- **Rich domain models & value objects** — entities encapsulate their own state (e.g. `Delete()` / `Restore()` on `BaseEntity`) instead of exposing public setters, and `Email` is modeled as a value object (`Email.Create(...)`) that normalizes and validates format at construction time rather than relying on ad-hoc string checks.
+- **Optimistic concurrency** — `User`, `Post`, and `Comment` are configured with an EF Core `RowVersion` column, so a concurrent update on a stale copy of the same row fails instead of silently overwriting another user's change.
+- **Reaction upsert instead of duplicates** — `POST /api/reactions` checks for an existing reaction by the same user on the same post/comment; if one exists, it updates the `Kind` in place instead of inserting a second row, keeping one reaction per user enforced at the service level.
+- **Soft delete** — `IsDeleted` lives on `BaseEntity` alongside `Delete()`/`Restore()` domain methods, so records are hidden rather than physically removed.
+- **Server-side pagination** — `GET /api/users` and `GET /api/posts` accept `pageNumber`/`pageSize` so listing endpoints don't load the full table per request.
+- **Startup pipeline** — on boot, the API applies pending EF Core migrations and seeds initial data automatically (`Database.MigrateAsync()` + seeder), so a fresh clone is immediately usable.
+
+---
+
+## Architecture
+
+The project follows **Clean Architecture** across four layers:
 
 ```
-BlogSocialFeed-API/
-├── Blog.Domain          → Entities, Value Objects, Enums       (no dependencies)
-├── Blog.Application     → Interfaces, DTOs, Services           (depends on Domain only)
-├── Blog.Infrastructure  → EF Core, Repositories, UnitOfWork    (depends on Application)
-└── Blog.Api             → Controllers, Middleware, Program.cs  (depends on Infrastructure)
+┌─────────────────────────────────────┐
+│           Blog.Api (Presentation)   │  ← Controllers, Middleware
+├─────────────────────────────────────┤
+│        Blog.Application (Business)  │  ← Services, DTOs, Interfaces
+├─────────────────────────────────────┤
+│          Blog.Domain (Core)         │  ← Entities, Value Objects, Enums
+├─────────────────────────────────────┤
+│      Blog.Infrastructure (Data)     │  ← EF Core, Repositories, Migrations, Seeding
+└─────────────────────────────────────┘
 ```
 
-> Dependencies only flow **inward** — the Domain layer has zero external dependencies.
+### Blog.Api
+- Controllers (Users, Posts, Comments, Reactions)
+- Global Exception Middleware
+- Swagger configuration
+
+### Blog.Application
+- Services (`UserService`, `PostService`, `CommentService`, `ReactionService`)
+- DTOs (request/response)
+- Repository & Unit of Work interfaces
+
+### Blog.Domain
+- Entities (`User`, `Post`, `Comment`, `Reaction`) inheriting from `BaseEntity`
+- Value Objects (`Email`)
+- Enums (`ReactionKind`)
+
+### Blog.Infrastructure
+- `BlogDbContext` and EF Core configurations
+- Repositories
+- Migrations
+- Seed data
 
 ---
 
-## ✨ Features
+## Tech Stack
 
-- **Users** — Create, update, soft-delete, and search users
-- **Posts** — Full CRUD with pagination
-- **Comments** — Add and manage comments on posts
-- **Reactions** — Like / Love / Clap / Smile on posts and comments (upsert logic)
-- **Soft Delete** — Records are never permanently removed from the database
-- **Pagination** — All list endpoints support `pageNumber` & `pageSize`
-- **Auto Migration & Seeding** — Database is created and seeded automatically on startup
-- **Global Exception Handling** — Consistent JSON error responses across all endpoints
-- **Swagger UI** — Interactive API documentation available in development
+| Technology | Notes |
+|---|---|
+| .NET | 9.0 |
+| ASP.NET Core Web API | 9.0 |
+| Entity Framework Core | 9.0 |
+| SQL Server | via EF Core |
+| Swashbuckle (Swagger) | API documentation |
 
 ---
 
-## 🔗 API Endpoints
+## Project Structure
 
-### Users
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/users` | Get all users (paginated) |
-| `GET` | `/api/users/{id}` | Get user by ID |
-| `GET` | `/api/users/search?term=` | Search users by username |
-| `GET` | `/api/users/count` | Get total users count |
-| `POST` | `/api/users` | Create a new user |
-| `PUT` | `/api/users/{id}` | Update user |
-| `DELETE` | `/api/users/{id}` | Soft delete user |
-
-### Posts
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/posts` | Get all posts (paginated) |
-| `GET` | `/api/posts/{id}` | Get post by ID |
-| `GET` | `/api/posts/user/{userId}` | Get posts by user |
-| `POST` | `/api/posts` | Create a new post |
-| `PUT` | `/api/posts/{id}` | Update post |
-| `DELETE` | `/api/posts/{id}` | Soft delete post |
-
-### Comments
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/comments/{id}` | Get comment by ID |
-| `GET` | `/api/comments/post/{postId}` | Get all comments for a post |
-| `POST` | `/api/comments` | Add a comment |
-| `PUT` | `/api/comments/{id}` | Update comment |
-| `DELETE` | `/api/comments/{id}` | Soft delete comment |
-
-### Reactions
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/reactions/post/{postId}` | Get all reactions for a post |
-| `GET` | `/api/reactions/post/{postId}/counts` | Get reaction counts grouped by type |
-| `POST` | `/api/reactions` | Add or update a reaction |
-| `DELETE` | `/api/reactions/{id}` | Remove a reaction |
+```
+Blog_With_API/
+│
+├── Blog.Api/
+│   ├── Controllers/
+│   │   ├── UsersController.cs
+│   │   ├── PostsController.cs
+│   │   ├── CommentsController.cs
+│   │   └── ReactionsController.cs
+│   ├── Middleware/
+│   │   └── GlobalExceptionMiddleware.cs
+│   ├── Extensions/
+│   └── Program.cs
+│
+├── Blog.Application/
+│   ├── DTOs/
+│   ├── Interfaces/
+│   └── Services/
+│       ├── UserService.cs
+│       ├── PostService.cs
+│       ├── CommentService.cs
+│       └── ReactionService.cs
+│
+├── Blog.Domain/
+│   ├── Entities/
+│   ├── ValueObjects/
+│   │   └── Email.cs
+│   └── Enums/
+│       └── ReactionKind.cs
+│
+└── Blog.Infrastructure/
+    ├── Persistence/
+    │   └── BlogDbContext.cs
+    ├── Configurations/
+    ├── Repositories/
+    ├── Migrations/
+    └── Seed Data/
+```
 
 ---
 
-## ⚙️ Getting Started
+## Design Patterns
+
+### Repository Pattern
+Each aggregate (`User`, `Post`, `Comment`, `Reaction`) has its own repository interface/implementation for data access, keeping EF Core details out of the service layer.
+
+### Unit of Work Pattern
+`IUnitOfWork` coordinates repositories and commits changes in a single `SaveChangesAsync` call per request.
+
+### Value Objects
+`Email` is a self-validating value object rather than a plain string property, so an invalid email can't exist on a `User` in the first place.
+
+### Optimistic Concurrency
+EF Core's `RowVersion` (configured via `IsRowVersion()` in the entity configurations) protects `User`, `Post`, and `Comment` from lost updates under concurrent writes.
+
+---
+
+## Getting Started
 
 ### Prerequisites
-- [.NET 9 SDK](https://dotnet.microsoft.com/download)
-- SQL Server (local or remote)
-- Visual Studio 2022+ or VS Code
 
-### 1. Clone the repository
+- [.NET 9 SDK](https://dotnet.microsoft.com/download)
+- SQL Server
+- Visual Studio 2022 or VS Code
+
+### Installation
+
+**1. Clone the repository**
 ```bash
 git clone https://github.com/mhmdibz/BlogSocialFeed-API.git
 cd BlogSocialFeed-API
 ```
 
-### 2. Configure the connection string
-Edit `Blog.Api/appsettings.json`:
+**2. Configure the connection string**
+
+Open `Blog.Api/appsettings.json` and update:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=.;Database=BlogDb;Trusted_Connection=True;TrustServerCertificate=True;"
+    "DefaultConnection": "Server=.;Database=BlogDb;Trusted_Connection=True;TrustServerCertificate=True"
   }
 }
 ```
 
-### 3. Run the API
+**3. Run the application**
+
+Migrations and seeding run automatically on startup — no separate `dotnet ef database update` step is required:
 ```bash
-cd Blog.Api
-dotnet run
+dotnet run --project Blog.Api
 ```
 
-> On first run, the app automatically applies all pending migrations and seeds the database with fake data (50 users, 100 posts, 200 comments, and reactions).
-
-### 4. Open Swagger UI
-Navigate to `https://localhost:{port}` in your browser — Swagger UI loads automatically.
-
----
-
-## 🧱 Key Design Decisions
-
-| Pattern | Implementation |
-|---------|---------------|
-| **Clean Architecture** | 4 isolated layers with inward-only dependencies |
-| **Domain-Driven Design** | Value Objects (`Email`), Rich Domain Model, encapsulated collections |
-| **Repository Pattern** | Generic interfaces per entity in the Application layer |
-| **Unit of Work** | Single `SaveChangesAsync` call per request |
-| **Soft Delete** | `IsDeleted` flag on `BaseEntity` — no hard deletes |
-| **Optimistic Concurrency** | `RowVersion` token on `BaseEntity` |
-| **CancellationToken** | Propagated through all async operations |
-| **Global Exception Middleware** | Maps exceptions to consistent HTTP status codes |
-| **Auto Seeding** | Bogus library generates realistic fake data on startup |
+**4. Open Swagger UI**
+```
+https://localhost:<port>/
+```
+(Swagger UI is served at the app root in development.)
 
 ---
 
-## 📦 Tech Stack
+## API Endpoints
 
-| | Technology |
-|--|-----------|
-| **Framework** | ASP.NET Core 9 Web API |
-| **ORM** | Entity Framework Core 9 |
-| **Database** | SQL Server |
-| **Documentation** | Swagger / Swashbuckle |
-| **Fake Data** | Bogus |
+22 endpoints across four resources:
+
+### Users
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/users?pageNumber=&pageSize=` | Get users with pagination |
+| GET | `/api/users/{id}` | Get user by ID |
+| GET | `/api/users/search?term=` | Search users |
+| GET | `/api/users/count` | Get total user count |
+| POST | `/api/users` | Create a new user |
+| PUT | `/api/users/{id}` | Update a user |
+| DELETE | `/api/users/{id}` | Soft-delete a user |
+
+### Posts
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/posts?pageNumber=&pageSize=` | Get posts with pagination |
+| GET | `/api/posts/{id}` | Get post by ID |
+| GET | `/api/posts/user/{userId}` | Get posts by a specific user |
+| POST | `/api/posts` | Create a new post |
+| PUT | `/api/posts/{id}` | Update a post |
+| DELETE | `/api/posts/{id}` | Soft-delete a post |
+
+### Comments
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/comments/{id}` | Get comment by ID |
+| GET | `/api/comments/post/{postId}` | Get comments for a post |
+| POST | `/api/comments` | Create a new comment |
+| PUT | `/api/comments/{id}` | Update a comment |
+| DELETE | `/api/comments/{id}` | Soft-delete a comment |
+
+### Reactions
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/reactions/post/{postId}` | Get reactions for a post |
+| GET | `/api/reactions/post/{postId}/counts` | Get reaction counts by kind for a post |
+| POST | `/api/reactions` | React to a post/comment (updates the existing reaction instead of duplicating it) |
+| DELETE | `/api/reactions/{id}` | Remove a reaction |
 
 ---
 
-## 📄 License
+## Future Improvements
 
-This project is open source and available under the [MIT License](LICENSE).
+- [ ] JWT Authentication & Authorization
+- [ ] Role-based access control
+- [ ] Unit & integration testing
+- [ ] Docker support
+- [ ] CI/CD pipeline
+- [ ] Notifications system
+- [ ] Rate limiting
+
+---
+
+## Learning Goals
+
+This project was built to practice:
+
+- Clean Architecture principles
+- Domain-Driven Design (rich models, value objects)
+- Optimistic concurrency handling in EF Core
+- Repository & Unit of Work patterns
+- Building idempotent-style upsert logic (reactions)
+
+---
+
+## Author
+
+**Mohamed Ibrahim Zaki**
+Backend Engineer (ASP.NET Core) & Computer Science Student
+[GitHub](https://github.com/mhmdibz) · [LinkedIn](https://www.linkedin.com/in/mohamed-ibrahim-dev-eg/)
+
+---
+
+## License
+
+This project is for educational and portfolio purposes.
